@@ -1,0 +1,2 @@
+pywin32>=305
+vgamepad>=0.1.0   ; platform_system == "Windows"
