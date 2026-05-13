@@ -65,6 +65,63 @@ So the library:
 
 ---
 
+## What is actually being bypassed
+
+Per channel, with no marketing:
+
+### `MouseEventInjector`
+
+Nothing. Source / Source 2 era engines simply never added filtering for the
+legacy Win9x mouse API. This channel is here because it is the shortest path
+to a game's input queue that those engines still accept — not because it
+defeats a defense.
+
+### `VirtualGamepad`
+
+This channel deliberately bypasses three engine-side filters:
+
+1. **`LLMHF_INJECTED` flag.** Events sent via `SendInput` / `keybd_event`
+   carry a kernel-set "this came from software" flag visible to low-level
+   hooks (`WH_MOUSE_LL`, `WH_KEYBOARD_LL`). Engines that care drop those
+   events. Gamepad packets are HID reports — no `LLMHF_INJECTED` analogue
+   exists on that path.
+
+2. **Synthetic-mouse smoothing.** UE5 and Apex's modified Source apply a
+   non-removable smoothing curve to mouse deltas whose
+   `RAWINPUTHEADER.hDevice` does not resolve to a registered HID mouse.
+   ViGEmBus registers a real HID device, so its packets are never routed
+   through that curve.
+
+3. **Foreground-input restrictions.** `SetCursorPos` and friends require the
+   target to be the foreground window and are rate-limited by USER32.
+   XInput packets have neither restriction.
+
+---
+
+## What is blocked, and why we do not use it
+
+For completeness, the methods you might reach for first and the reason each
+one fails against modern PC games:
+
+| API / technique                         | Blocked by                                                                                                                                  |
+| --------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------- |
+| `user32!SendInput`                      | Events carry `LLMHF_INJECTED`. Filtered by Fortnite, Apex, Valorant, recent CoD, every UE5 title.                                           |
+| `user32!keybd_event` (keyboard)         | Same `LLMHF_INJECTED` flag, same engines drop it.                                                                                           |
+| `user32!SetCursorPos` / `mouse_event` absolute moves | Most FPS engines read raw `WM_INPUT` deltas, not cursor position. Cursor warps are simply ignored in-game.                       |
+| DirectInput keyboard/mouse              | Microsoft-deprecated since Win8. Modern engines do not poll it; the few that do treat it as superseded by Raw Input.                        |
+| `PostMessage(WM_MOUSEMOVE, …)`          | Most engines hook `WM_INPUT`, not `WM_MOUSEMOVE`. The message arrives, the game does nothing with it.                                       |
+| Hooking the game's input thread (DLL injection) | Trips every anti-cheat that scans for unsigned modules in the process image. Out of scope for a user-mode library anyway.           |
+| Reading/writing game memory             | Same problem, much louder. Out of scope.                                                                                                    |
+
+What is **not** blocked — and what this library uses:
+
+| API / technique                         | Why it still works                                                                                                                          |
+| --------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------- |
+| `user32!mouse_event` (relative deltas)  | Predates `LLMHF_INJECTED`; no flag attached. Source / Source 2 era engines accept it without filtering.                                     |
+| XInput packets via ViGEmBus             | Driver is signed by Microsoft and exposes a virtual HID device. From the game's perspective the packets are indistinguishable from a real Xbox controller. |
+
+---
+
 ## How it works
 
 ```
