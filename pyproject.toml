@@ -5,12 +5,16 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "game-input-bypass"
 version = "0.3.0"
-description = "External, fully user-mode input delivery for Win32 games that filter synthetic input. ViGEmBus-backed virtual HID controller."
+description = "External user-mode input layer for Win32 games. Defeats synthetic-input filtering via a Microsoft-signed virtual HID controller, and behavioral curve analysis via an Ornstein-Uhlenbeck stick humanizer."
 readme = "README.md"
 license = { text = "MIT" }
 requires-python = ">=3.9"
 authors = [{ name = "game-input-bypass contributors" }]
-keywords = ["input", "injection", "vigem", "xinput", "win32", "gamedev", "research"]
+keywords = [
+    "input", "vigem", "vigembus", "xinput", "virtual-controller",
+    "humanizer", "tremor", "ornstein-uhlenbeck",
+    "win32", "windows", "gamedev", "automation", "research",
+]
 classifiers = [
     "Development Status :: 4 - Beta",
     "Environment :: Win32 (MS Windows)",
