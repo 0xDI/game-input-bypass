@@ -1,25 +1,13 @@
-"""Adaptive user-mode input injection for Win32 games.
+"""External input delivery via a Microsoft-signed virtual HID controller.
 
 Public API:
-
-    InputBypass         high-level facade, picks channel by foreground window
-    VirtualGamepad      ViGEmBus-backed XInput 360 pad
-    MouseEventInjector  legacy user32!mouse_event path
-    detect_game         classify the foreground window
-    preferred_channel   look up the channel for a profile key
+    VirtualGamepad   ViGEmBus-backed XInput 360 pad
+    detect_game      classify the foreground window
+    GameProfile      profile dataclass
 """
 
-from .channels import VirtualGamepad, MouseEventInjector
-from .detect import detect_game, preferred_channel, GameProfile
-from .bypass import InputBypass
+from .gamepad import VirtualGamepad
+from .detect import detect_game, GameProfile, iter_profiles
 
-__all__ = [
-    "InputBypass",
-    "VirtualGamepad",
-    "MouseEventInjector",
-    "detect_game",
-    "preferred_channel",
-    "GameProfile",
-]
-
-__version__ = "0.1.0"
+__all__ = ["VirtualGamepad", "detect_game", "GameProfile", "iter_profiles"]
+__version__ = "0.2.0"

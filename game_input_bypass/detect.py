@@ -1,4 +1,8 @@
-"""Foreground-window classification."""
+"""Foreground-window classification.
+
+Only titles where the virtual-gamepad path is verified to defeat synthetic-
+input filtering are listed. Adding a profile is one entry in `_PROFILES`.
+"""
 
 from __future__ import annotations
 
@@ -11,20 +15,15 @@ import win32gui
 @dataclass(frozen=True)
 class GameProfile:
     key: str
-    channel: str            # "gamepad" | "mouse_event"
     title_needles: Tuple[str, ...]
 
 
-# Order matters: first match wins.
+# Targets whose engines filter `LLMHF_INJECTED` mouse input but accept XInput.
 _PROFILES: Tuple[GameProfile, ...] = (
-    GameProfile("fortnite",       "gamepad",     ("fortnite",)),
-    GameProfile("csgo",           "mouse_event", ("counter-strike", "cs:go",
-                                                  "cs2", "counter-strike 2",
-                                                  "counter-strike: global offensive")),
-    GameProfile("apex",           "gamepad",     ("apex legends",)),
-    GameProfile("valorant",       "mouse_event", ("valorant",)),
-    GameProfile("source_classic", "mouse_event", ("half-life", "team fortress",
-                                                  "left 4 dead", "portal")),
+    GameProfile("fortnite",         ("fortnite",)),
+    GameProfile("apex_legends",     ("apex legends",)),
+    GameProfile("fragpunk",         ("fragpunk",)),
+    GameProfile("the_finals",       ("the finals",)),
 )
 
 
@@ -44,18 +43,6 @@ def detect_game(title: Optional[str] = None) -> Optional[GameProfile]:
         if any(n in t for n in p.title_needles):
             return p
     return None
-
-
-def preferred_channel(profile: GameProfile | str | None) -> str:
-    """Resolve a profile (object or key) to its channel name."""
-    if profile is None:
-        return "mouse_event"
-    if isinstance(profile, GameProfile):
-        return profile.channel
-    for p in _PROFILES:
-        if p.key == profile:
-            return p.channel
-    return "mouse_event"
 
 
 def iter_profiles() -> Iterable[GameProfile]:

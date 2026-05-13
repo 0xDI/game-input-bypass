@@ -1,14 +1,16 @@
-"""Minimal sanity check.
+"""Sanity check: attach the virtual pad and sweep the right stick.
 
-Resolves the active channel for the foreground window, prints it, then sends
-a few small movements. Run this with Notepad focused to verify mouse_event,
-or with Fortnite focused to verify the ViGEm pad attaches.
+Run with the target game focused; you should see the camera pan right then
+left in a sine wave. If nothing happens, verify ViGEmBus is installed
+(``Get-PnpDevice -FriendlyName 'ViGEm*'``) and that the title is listed in
+``game_input_bypass.detect``.
 """
 
 import logging
+import math
 import time
 
-from game_input_bypass import InputBypass, detect_game
+from game_input_bypass import VirtualGamepad, detect_game
 
 logging.basicConfig(level=logging.INFO, format="%(levelname)s %(message)s")
 
@@ -17,11 +19,14 @@ def main() -> None:
     profile = detect_game()
     print(f"foreground profile: {profile.key if profile else 'unknown'}")
 
-    ib = InputBypass()
-    for _ in range(20):
-        ib.move(5, 0)
-        time.sleep(0.02)
-    ib.release()
+    pad = VirtualGamepad()
+    try:
+        for i in range(120):
+            dx = math.sin(i / 10.0) * 80.0
+            pad.move(dx, 0.0)
+            time.sleep(1 / 120.0)
+    finally:
+        pad.release()
 
 
 if __name__ == "__main__":

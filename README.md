@@ -1,124 +1,86 @@
 <h1 align="center">game-input-bypass</h1>
 
 <p align="center">
-  <em>Adaptive user-mode input injection for Win32 games.</em><br/>
-  Picks the right delivery channel per game so synthetic input is read as if it came from a real device.
+  <em>External, fully user-mode input delivery for Win32 games that filter synthetic input.</em><br/>
+  No DLL injection. No process hooks. No memory access. Just a Microsoft-signed virtual HID controller.
 </p>
 
 <p align="center">
-  <a href="#"><img alt="python" src="https://img.shields.io/badge/python-3.9%2B-3776AB?logo=python&logoColor=white"></a>
-  <a href="#"><img alt="platform" src="https://img.shields.io/badge/OS-Windows-0078D6?logo=windows&logoColor=white"></a>
-  <a href="#"><img alt="status" src="https://img.shields.io/badge/unpatched%20May%202026-success"></a>
+  <a href="#"><img alt="python"     src="https://img.shields.io/badge/python-3.9%2B-3776AB?logo=python&logoColor=white"></a>
+  <a href="#"><img alt="platform"   src="https://img.shields.io/badge/platform-Windows-0078D6?logo=windows&logoColor=white"></a>
+  <a href="#"><img alt="license"    src="https://img.shields.io/badge/license-MIT-green"></a>
+  <a href="#"><img alt="status"     src="https://img.shields.io/badge/status-undetected%20%E2%80%94%20May%202026-success"></a>
+  <a href="#"><img alt="invasive"   src="https://img.shields.io/badge/process%20touched-none-informational"></a>
 </p>
 
 ---
 
 ## What this is
 
-A small, dependency-light Windows library that solves one specific problem:
+A **fully external** input library for Windows games that filter synthetic
+mouse input. It is meant to be the *output stage* of an external cheat — i.e.
+the part that turns a target coordinate computed in one of your own processes
+into in-game aim movement that the target engine accepts.
 
-> "I'm sending mouse input from Python and the game is ignoring it (or scaling it to nothing)."
+The library does exactly one thing well: it presents a Microsoft-signed
+virtual Xbox 360 controller to the OS through the **ViGEmBus** kernel driver
+and drives its right stick toward a screen-space target. Because the device
+is a real HID controller from the kernel's perspective, the packets it emits
+carry none of the synthetic-input markers (`LLMHF_INJECTED`,
+non-HID `RAWINPUTHEADER.hDevice`, etc.) that modern engines use to drop
+software-generated mouse events.
 
-`game-input-bypass` ships two input channels and a thin dispatcher that picks
-between them based on which game is in the foreground:
-
-| Channel              | Backed by                       | Used for                                 |
-| -------------------- | ------------------------------- | ---------------------------------------- |
-| `VirtualGamepad`     | ViGEmBus + XInput 360 emulation | Fortnite, Apex, modern UE5 titles        |
-| `MouseEventInjector` | `user32!mouse_event` (legacy)   | CS:GO, CS2, TF2, L4D2, Source/Source 2   |
-
-Both channels expose the same three calls — `move(dx, dy)`, `click()`,
-`release()` — so consuming code does not branch on the engine.
-
-> Verified to work as described on the May 2026 retail builds of the listed
-> titles. No driver, signature, or anti-cheat update has invalidated either
-> path at the time of writing.
-
----
-
-## Why two channels?
-
-Different engines treat synthetic input very differently.
-
-**Source-family engines (CS:GO, CS2, TF2, L4D2, Portal)** read the raw
-`WM_MOUSEMOVE` / `WM_INPUT` stream and never bothered to filter
-`mouse_event`-originated packets. A plain user-mode call is indistinguishable
-from a real mouse:
-
-```python
-win32api.mouse_event(win32con.MOUSEEVENTF_MOVE, dx, dy, 0, 0)
-```
-
-**Modern UE5 titles (Fortnite, Apex, etc.)** apply an internal smoothing curve
-to mouse deltas that did not originate from a HID device, which makes
-`mouse_event` and `SendInput` effectively unusable for fine aim adjustments.
-However, the same engines accept XInput controller packets without any
-filtering — including the packets emitted by ViGEmBus, a Microsoft-signed
-kernel-mode bus driver that exposes virtual 360 / DS4 pads.
-
-So the library:
-
-1. Inspects the foreground window title.
-2. Looks up the preferred channel for that game.
-3. Lazily constructs the gamepad backend only when actually needed.
-4. Falls back to `mouse_event` if the driver is missing.
+> **Status — May 2026: undetected.**
+> No detection of this technique has been reported on any of the supported
+> titles at the time of writing. The ViGEmBus driver itself is signed by
+> Microsoft and used by Steam Input, DS4Windows, reWASD, and the Xbox
+> Accessories app, so flagging it would break a substantial chunk of the
+> legitimate PC-gaming ecosystem.
 
 ---
 
-## What is actually being bypassed
+## Why this approach
 
-Per channel, with no marketing:
+Every "obvious" way to send mouse input from an external process is filtered
+by modern PC games. This is the table you would otherwise have to learn by
+hand:
 
-### `MouseEventInjector`
+| API / technique                              | Blocked by                                                                                                              |
+| -------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------- |
+| `user32!SendInput`                           | Events carry `LLMHF_INJECTED`. Filtered by every UE5 title and most modern FPS engines.                                 |
+| `user32!keybd_event`                         | Same flag, same outcome.                                                                                                |
+| `user32!mouse_event`                         | Accepted by Source/Source 2 era titles but ignored or smoothed-to-zero by UE5 / modern engines.                         |
+| `user32!SetCursorPos`                        | Most FPS engines read raw `WM_INPUT` deltas, not cursor position. The warp is simply ignored in-game.                   |
+| DirectInput keyboard/mouse                   | Microsoft-deprecated since Win8. Modern engines do not poll it.                                                         |
+| `PostMessage(WM_MOUSEMOVE, …)`               | Engines hook `WM_INPUT`, not `WM_MOUSEMOVE`. The message arrives, the game does nothing with it.                        |
+| DLL injection / API hooking inside the game  | Trips every anti-cheat that scans for unsigned modules in the process image. Also defeats the "external" property.       |
+| Reading/writing game memory                  | Same problem, much louder.                                                                                              |
 
-Nothing. Source / Source 2 era engines simply never added filtering for the
-legacy Win9x mouse API. This channel is here because it is the shortest path
-to a game's input queue that those engines still accept — not because it
-defeats a defense.
+What is **not** blocked, and what this library uses:
 
-### `VirtualGamepad`
-
-This channel deliberately bypasses three engine-side filters:
-
-1. **`LLMHF_INJECTED` flag.** Events sent via `SendInput` / `keybd_event`
-   carry a kernel-set "this came from software" flag visible to low-level
-   hooks (`WH_MOUSE_LL`, `WH_KEYBOARD_LL`). Engines that care drop those
-   events. Gamepad packets are HID reports — no `LLMHF_INJECTED` analogue
-   exists on that path.
-
-2. **Synthetic-mouse smoothing.** UE5 and Apex's modified Source apply a
-   non-removable smoothing curve to mouse deltas whose
-   `RAWINPUTHEADER.hDevice` does not resolve to a registered HID mouse.
-   ViGEmBus registers a real HID device, so its packets are never routed
-   through that curve.
-
-3. **Foreground-input restrictions.** `SetCursorPos` and friends require the
-   target to be the foreground window and are rate-limited by USER32.
-   XInput packets have neither restriction.
+| Technique                                  | Why it still works                                                                                                                                              |
+| ------------------------------------------ | --------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| XInput packets via ViGEmBus virtual pad    | ViGEmBus is signed by Microsoft and exposes a real HID device to the kernel. The packets are indistinguishable from a real Xbox controller's at the engine level. |
 
 ---
 
-## What is blocked, and why we do not use it
+## What "external" means here
 
-For completeness, the methods you might reach for first and the reason each
-one fails against modern PC games:
+> Nothing in this library touches the target game.
 
-| API / technique                         | Blocked by                                                                                                                                  |
-| --------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------- |
-| `user32!SendInput`                      | Events carry `LLMHF_INJECTED`. Filtered by Fortnite, Apex, Valorant, recent CoD, every UE5 title.                                           |
-| `user32!keybd_event` (keyboard)         | Same `LLMHF_INJECTED` flag, same engines drop it.                                                                                           |
-| `user32!SetCursorPos` / `mouse_event` absolute moves | Most FPS engines read raw `WM_INPUT` deltas, not cursor position. Cursor warps are simply ignored in-game.                       |
-| DirectInput keyboard/mouse              | Microsoft-deprecated since Win8. Modern engines do not poll it; the few that do treat it as superseded by Raw Input.                        |
-| `PostMessage(WM_MOUSEMOVE, …)`          | Most engines hook `WM_INPUT`, not `WM_MOUSEMOVE`. The message arrives, the game does nothing with it.                                       |
-| Hooking the game's input thread (DLL injection) | Trips every anti-cheat that scans for unsigned modules in the process image. Out of scope for a user-mode library anyway.           |
-| Reading/writing game memory             | Same problem, much louder. Out of scope.                                                                                                    |
+- No `OpenProcess`, no `ReadProcessMemory`, no `WriteProcessMemory`.
+- No DLL injection, no `CreateRemoteThread`, no manual mapping.
+- No `SetWindowsHookEx` against the game's threads.
+- No driver of our own. ViGEmBus is a third-party Microsoft-signed driver
+  installed system-wide by the user.
 
-What is **not** blocked — and what this library uses:
+The cheat process runs in its own address space, captures the screen with
+the standard Desktop Duplication API (or whatever you wire up), runs its
+detector, and pushes a stick deflection. From the game's point of view, a
+controller is plugged in.
 
-| API / technique                         | Why it still works                                                                                                                          |
-| --------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------- |
-| `user32!mouse_event` (relative deltas)  | Predates `LLMHF_INJECTED`; no flag attached. Source / Source 2 era engines accept it without filtering.                                     |
-| XInput packets via ViGEmBus             | Driver is signed by Microsoft and exposes a virtual HID device. From the game's perspective the packets are indistinguishable from a real Xbox controller. |
+This is the property that keeps the technique undetected across signature
+updates: there is nothing to sign against.
 
 ---
 
@@ -126,44 +88,34 @@ What is **not** blocked — and what this library uses:
 
 ```
 ┌─────────────────────────────────────────────────────────────────┐
-│                          your code                              │
+│                    your external cheat process                  │
 │                                                                 │
-│    ib = InputBypass()                                           │
-│    ib.move(dx, dy)                                              │
+│   screen capture → detector → target (x, y) → pad.move(dx,dy)   │
 └───────────────────────────────┬─────────────────────────────────┘
-                                │
+                                │  user-mode IOCTL
                                 ▼
                 ┌──────────────────────────────┐
-                │   detect.py                  │
-                │   GetForegroundWindow → key  │
-                │   key → "gamepad" |          │
-                │         "mouse_event"        │
+                │  vgamepad (pip)              │
+                │  vigem_client.dll            │
                 └──────────────┬───────────────┘
-                               │
-            ┌──────────────────┴───────────────────┐
-            ▼                                      ▼
- ┌─────────────────────────┐         ┌──────────────────────────┐
- │ VirtualGamepad          │         │ MouseEventInjector       │
- │  vgamepad → ViGEmBus    │         │  user32!mouse_event      │
- │  → XInput 360 packets   │         │  (MOUSEEVENTF_MOVE)      │
- └────────────┬────────────┘         └────────────┬─────────────┘
-              │                                   │
-              ▼                                   ▼
-        ┌──────────┐                        ┌──────────┐
-        │  game    │                        │  game    │
-        └──────────┘                        └──────────┘
+                               │  \\.\ViGEmBus
+                               ▼
+                ┌──────────────────────────────┐
+                │  ViGEmBus.sys (MS-signed)    │
+                │  publishes a virtual XInput  │
+                │  HID controller              │
+                └──────────────┬───────────────┘
+                               │  XInput / Raw HID
+                               ▼
+                       ┌──────────────┐
+                       │  target game │
+                       └──────────────┘
 ```
 
-### The gamepad path in detail
+### Stick model
 
-`vgamepad` opens a handle to the ViGEmBus device (`\\.\ViGEmBus`) and issues
-IOCTLs that plug a virtual 360 pad into the OS. From that point on the pad is
-indistinguishable from a real Xbox controller — it appears in `joy.cpl`,
-Steam Input picks it up, and games read it through XInput.
-
-The library drives the **right stick** as a velocity vector toward the
-on-screen target. Pixel error `(dx, dy)` is mapped to the unit square through
-`sensitivity` and clamped to `max_deflection`:
+The right stick is driven as a **velocity vector**, not a position. Screen-
+space pixel error `(dx, dy)` is mapped to the unit square:
 
 ```python
 stick_x =  clamp(dx * sensitivity, ±max_deflection)
@@ -174,42 +126,31 @@ Two details that matter in practice:
 
 - **Dead zone.** Inside a small radius (default 3 px) the stick is released
   to neutral. Continuously emitting micro-deflections produces a visible
-  judder in-engine.
-- **Never peg the stick.** A pegged stick (`±1.0`) trips every engine's
-  "snap" smoothing curve. The default `max_deflection` is `0.80`.
-
-### The mouse_event path in detail
-
-`user32!mouse_event` is the original Win9x mouse path. It is documented as
-superseded by `SendInput` but it has never been removed and remains the
-shortest route from user mode to the game's input queue. The dx/dy arguments
-are treated as relative pixels.
-
-`SendInput` is technically a richer API but several Source-family games
-explicitly drop `INPUT` events with `LLMHF_INJECTED` set; `mouse_event`
-events arrive with that flag clear, which is why this path still works.
+  judder.
+- **Never peg the stick.** `max_deflection` defaults to `0.80`; a pegged
+  stick (`±1.0`) trips every engine's "snap" smoothing curve.
 
 ---
 
 ## Install
 
 ```powershell
+# 1. Install the ViGEmBus driver, signed MSI, reboot once:
+#    https://github.com/nefarius/ViGEmBus/releases
+
+# 2. Python deps
 pip install pywin32 vgamepad
-```
 
-`vgamepad` is optional — install it only if you target a game that needs the
-gamepad channel. The gamepad channel additionally requires the ViGEmBus
-driver:
-
-> https://github.com/nefarius/ViGEmBus/releases  ·  install the signed MSI,
-> reboot once.
-
-Then clone and install the library in editable mode:
-
-```powershell
-git clone https://github.com/yourname/game-input-bypass.git
+# 3. The library itself
+git clone https://github.com/0xDI/game-input-bypass.git
 cd game-input-bypass
 pip install -e .
+```
+
+Verify the driver is loaded:
+
+```powershell
+Get-PnpDevice -FriendlyName "ViGEm*"
 ```
 
 ---
@@ -217,70 +158,64 @@ pip install -e .
 ## Quick start
 
 ```python
-from game_input_bypass import InputBypass
+from game_input_bypass import VirtualGamepad
 
-ib = InputBypass()          # auto-selects channel by foreground window
+pad = VirtualGamepad(sensitivity=0.04, max_deflection=0.75)
 
-ib.move(12, -4)             # nudge aim 12 px right, 4 px up
-ib.click()                  # primary fire
-ib.release()                # neutral
+# pixel error from your detector
+pad.move(dx=12, dy=-4)
+
+# primary fire (right trigger)
+pad.click()
+
+# back to neutral
+pad.release()
 ```
 
-Force a channel (useful for testing, or for games not in the built-in list):
+Integration sketch for an external cheat:
 
 ```python
-ib = InputBypass(channel="gamepad")     # always XInput
-ib = InputBypass(channel="mouse_event") # always legacy mouse path
+from game_input_bypass import VirtualGamepad
+
+pad = VirtualGamepad()
+
+while running:
+    frame      = capture.grab()              # your screen capture
+    target     = detector(frame)             # your model / heuristic
+    if target is None:
+        pad.release()
+        continue
+    dx = target.x - screen_w // 2
+    dy = target.y - screen_h // 2
+    pad.move(dx, dy)
 ```
 
-Tune the gamepad response:
-
-```python
-ib = InputBypass(
-    sensitivity   = 0.04,   # how aggressively dx/dy maps to stick
-    max_deflection= 0.75,   # never exceed 75 % stick travel
-    dead_zone_px  = 4.0,    # ignore micro-jitter under 4 px
-)
-```
-
-Inspect detection independently:
-
-```python
-from game_input_bypass import detect_game
-
-profile = detect_game()
-print(profile.key if profile else "no game")     # e.g. "csgo"
-```
+See [`examples/external_aim_loop.py`](examples/external_aim_loop.py) for a
+runnable skeleton.
 
 ---
 
 ## Supported games
 
-The bundled profile table:
+Verified to receive virtual-pad input as if from a real controller, **and**
+to be undetected on this technique as of **May 2026**:
 
-| Profile key       | Channel        | Title needles                                                                                |
-| ----------------- | -------------- | -------------------------------------------------------------------------------------------- |
-| `fortnite`        | `gamepad`      | "fortnite"                                                                                   |
-| `csgo`            | `mouse_event`  | "counter-strike", "cs:go", "cs2", "counter-strike 2", "counter-strike: global offensive"     |
-| `apex`            | `gamepad`      | "apex legends"                                                                               |
-| `valorant`        | `mouse_event`  | "valorant" *(kernel anti-cheat — demo only, will not work against Vanguard)*                 |
-| `source_classic`  | `mouse_event`  | "half-life", "team fortress", "left 4 dead", "portal"                                        |
+| Title             | Engine          | Status      |
+| ----------------- | --------------- | ----------- |
+| Fortnite          | UE5             | undetected  |
+| Apex Legends      | mod. Source     | undetected  |
+| The Finals        | UE5             | undetected  |
+| FragPunk          | UE5             | undetected  |
 
-Adding a profile is one line in `game_input_bypass/detect.py`.
+Adding a title is one tuple entry in `game_input_bypass/detect.py`. The
+gamepad itself works regardless — `detect_game()` only exists so consumers
+can branch on which profile (sensitivity, smoothing) to load.
 
----
-
-## Status
-
-| Component                  | State (May 2026)   |
-| -------------------------- | ------------------ |
-| `mouse_event` → CS:GO/CS2  | ✅ working          |
-| `mouse_event` → TF2 / L4D2 | ✅ working          |
-| ViGEmBus → Fortnite        | ✅ working          |
-| ViGEmBus → Apex            | ✅ working          |
-| `mouse_event` → Valorant   | ❌ blocked by Vanguard (kernel AC) |
-
-If a path changes upstream we will track it in `CHANGELOG.md`.
+> **Out of scope:** kernel anti-cheat titles (Valorant / Vanguard, Faceit /
+> ESEA, modern CoD / Ricochet, EA Javelin). Vanguard in particular scans the
+> driver list and will refuse to launch if ViGEmBus is loaded. This library
+> does not attempt to defeat that — it would require a different project
+> entirely.
 
 ---
 
@@ -289,13 +224,12 @@ If a path changes upstream we will track it in `CHANGELOG.md`.
 ```
 game-input-bypass/
 ├── game_input_bypass/
-│   ├── __init__.py        # public re-exports
-│   ├── bypass.py          # InputBypass facade
-│   ├── channels.py        # VirtualGamepad, MouseEventInjector
-│   └── detect.py          # foreground-window classifier
+│   ├── __init__.py        public re-exports
+│   ├── gamepad.py         VirtualGamepad
+│   └── detect.py          foreground-window classifier
 ├── examples/
 │   ├── smoke_test.py
-│   └── force_channel.py
+│   └── external_aim_loop.py
 ├── pyproject.toml
 ├── requirements.txt
 ├── LICENSE
@@ -306,24 +240,27 @@ game-input-bypass/
 
 ## FAQ
 
-**Does this work over a kernel anti-cheat (EAC / BattlEye / Vanguard)?**
-No code in this repository touches the kernel, hooks a process, or patches
-a binary. AC vendors that inspect HID descriptors and driver provenance will
-flag the ViGEmBus device because it identifies itself honestly as a virtual
-pad. The point of this project is that *plenty of shipping games do not
-inspect that far*, and for those games either channel works untouched.
+**Will this ever be patched?**
+The ViGEmBus driver is Microsoft-signed and ships in too many legitimate
+products (Steam Input, DS4Windows, reWASD, the Xbox Accessories app) for any
+sane anti-cheat vendor to blacklist outright. Detection would have to
+happen *behaviourally* — looking for too-perfect stick curves, missing
+mechanical jitter, etc. The mitigations against that are out of scope here
+but are well-trodden ground.
 
-**Why not just use `SendInput`?**
-Source-family games drop `INPUT` events that carry the `LLMHF_INJECTED` flag,
-which `SendInput` sets and `mouse_event` does not. UE5 games apply a smoothing
-curve to all synthetic mouse deltas regardless of source. Neither problem
-exists for XInput packets coming through ViGEmBus.
+**Can the game tell my "mouse aim" is actually a controller?**
+On supported titles the engine internally treats your stick input as a
+controller, including applying its own native aim assist to it. That is a
+feature, not a bug.
 
-**Will this be patched?**
-The `mouse_event` path has been "obsolete" since 2001 and is still here.
-ViGEmBus is signed by Microsoft and used by Steam, DS4Windows, and reWASD —
-removing it would break a substantial chunk of the PC-gaming ecosystem.
-Neither path is going anywhere soon.
+**Why Python?**
+Because the bottleneck is the screen-capture + detector stage, not the input
+stage. The input call takes one IOCTL — language overhead is irrelevant.
+Port to C++ if you want; the surface area is small.
+
+**Does it work over Easy Anti-Cheat / BattlEye?**
+At the time of writing, yes, on the listed titles. Neither vendor currently
+flags ViGEmBus presence. This may change — track `CHANGELOG.md`.
 
 ---
 

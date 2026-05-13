@@ -4,8 +4,8 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "game-input-bypass"
-version = "0.1.0"
-description = "Adaptive user-mode input injection (ViGEmBus / mouse_event) for Win32 games."
+version = "0.2.0"
+description = "External, fully user-mode input delivery for Win32 games that filter synthetic input. ViGEmBus-backed virtual HID controller."
 readme = "README.md"
 license = { text = "MIT" }
 requires-python = ">=3.9"
@@ -24,15 +24,15 @@ classifiers = [
 ]
 dependencies = [
     "pywin32>=305",
+    "vgamepad>=0.1.0",
 ]
 
 [project.optional-dependencies]
-gamepad = ["vgamepad>=0.1.0"]
 dev = ["pytest>=7", "ruff>=0.1"]
 
 [project.urls]
-Homepage = "https://github.com/yourname/game-input-bypass"
-Issues   = "https://github.com/yourname/game-input-bypass/issues"
+Homepage = "https://github.com/0xDI/game-input-bypass"
+Issues   = "https://github.com/0xDI/game-input-bypass/issues"
 
 [tool.setuptools.packages.find]
 include = ["game_input_bypass*"]
