@@ -70,6 +70,18 @@ class VirtualGamepad:
         self._pad.right_joystick_float(x_value_float=0.0, y_value_float=0.0)
         self._pad.update()
 
+    def set_stick(self, sx: float, sy: float) -> None:
+        """Set right-stick deflection directly in normalized [-1, 1] units.
+
+        Bypasses sensitivity / dead-zone / clamping. Used by higher-level
+        shaping layers (see :class:`HumanizedGamepad`) that compute their own
+        deflection in stick space.
+        """
+        sx = max(-1.0, min(1.0, sx))
+        sy = max(-1.0, min(1.0, sy))
+        self._pad.right_joystick_float(x_value_float=sx, y_value_float=sy)
+        self._pad.update()
+
     def click(self, hold_ms: int = 10) -> None:
         """Pull the right trigger (primary fire on a controller)."""
         self._pad.right_trigger_float(value_float=1.0)

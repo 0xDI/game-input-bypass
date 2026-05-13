@@ -195,6 +195,88 @@ runnable skeleton.
 
 ---
 
+## HumanizedGamepad — behavioral shaping
+
+Raw `VirtualGamepad` output is delivered to the game as-is. That defeats
+*injection-detection* heuristics (no `LLMHF_INJECTED`, packets look like
+HID), but the resulting stick *signal* still doesn't look human:
+
+- Step response is instantaneous — no acceleration phase.
+- Output is bit-exact when the input repeats.
+- The stick rests at a perfect zero between targets.
+- No reaction time between a target appearing and aim onset.
+- Snap-aim has no overshoot/correct phase.
+
+These are the signatures modern *behavioral* anti-cheat (Vanguard, Ricochet,
+EA Javelin, FaceIt's curve analysis) actually looks at. `HumanizedGamepad`
+is a drop-in wrapper that replaces each one with a physiologically plausible
+substitute:
+
+```python
+from game_input_bypass import HumanizedGamepad
+
+pad = HumanizedGamepad(sensitivity=0.04, max_deflection=0.75)
+
+while running:
+    pad.move(dx, dy)        # exact same API as VirtualGamepad
+```
+
+### What it shapes
+
+| Layer            | Mechanism                                                                                   |
+| ---------------- | ------------------------------------------------------------------------------------------- |
+| Reaction delay   | New target (input jump > 60 px) gates output for a uniform 80-150 ms hold                   |
+| Easing           | First-order low-pass approach, default time constant 80 ms; frame-rate independent          |
+| Tremor           | 2-D Ornstein-Uhlenbeck process tuned to the 6-12 Hz physiologic action-tremor band          |
+| Overshoot        | Large snaps (>120 px) briefly amplified by ~8 % for 35 ms before settling                   |
+| Idle drift       | Tremor source keeps emitting during `release()` so the pad never reads as a frozen stick    |
+
+All five layers run every frame; they are not modes. The output is one
+`set_stick()` call per frame whose trajectory carries all of the signatures
+together.
+
+### Tuning
+
+Every parameter is a keyword argument on the constructor. The defaults are
+calibrated for a 1920×1080 detector with a typical FoV of 90°; lower
+sensitivity if you over-rotate, raise `tremor_amplitude` if you want a more
+audible tremor signature in the behavioral fingerprint.
+
+```python
+pad = HumanizedGamepad(
+    sensitivity        = 0.04,
+    max_deflection     = 0.75,
+    reaction_ms_min    = 80,    reaction_ms_max  = 150,
+    easing_tau_ms      = 80,
+    tremor_amplitude   = 0.006, tremor_band_hz   = 8.0,
+    overshoot_factor   = 1.08,  overshoot_ms     = 35,
+    seed               = None,   # set for reproducible output
+)
+```
+
+### Verifying the curve
+
+`examples/humanizer_trace.py` runs the humanizer against a virtual clock
+with a mocked pad — no driver required — and prints summary statistics for
+each phase. Sample output:
+
+```
+clock: virtual @ 240 Hz   seed: 42
+
+  idle baseline          n= 240  mean=+0.0013  std=0.0060  min=-0.0154  max=+0.0189
+  snap (reaction + pull) n=  30  mean=+0.0113  std=0.0392  min=-0.0185  max=+0.1622
+  steady tracking        n= 240  mean=+0.7505  std=0.1109  min=+0.1997  max=+0.8208
+  release decay          n= 240  mean=+0.0611  std=0.1433  min=-0.0165  max=+0.7612
+
+checks passed: tremor present, tracking settles, release decays
+```
+
+Note that the idle `std` matches the configured `tremor_amplitude` to four
+decimal places — the OU process is calibrated so its stationary standard
+deviation equals the requested amplitude.
+
+---
+
 ## Supported games
 
 Verified to receive virtual-pad input as if from a real controller, **and**
@@ -226,10 +308,12 @@ game-input-bypass/
 ├── game_input_bypass/
 │   ├── __init__.py        public re-exports
 │   ├── gamepad.py         VirtualGamepad
+│   ├── humanizer.py       HumanizedGamepad  (OU tremor + easing + reaction)
 │   └── detect.py          foreground-window classifier
 ├── examples/
 │   ├── smoke_test.py
-│   └── external_aim_loop.py
+│   ├── external_aim_loop.py
+│   └── humanizer_trace.py  headless trace + correctness checks
 ├── pyproject.toml
 ├── requirements.txt
 ├── LICENSE

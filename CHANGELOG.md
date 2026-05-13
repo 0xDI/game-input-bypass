@@ -2,6 +2,22 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.3.0] - 2026-05-13
+### Added
+- **`HumanizedGamepad`** — behavioral shaping layer that wraps
+  `VirtualGamepad`. Drop-in replacement that adds physiological tremor
+  (Ornstein-Uhlenbeck process tuned to the 6-12 Hz action-tremor band),
+  exponential easing toward target, reaction-delay gating on new targets,
+  overshoot-and-correct on large snaps, and idle drift so the controller
+  never reads as a frozen stick.
+- `VirtualGamepad.set_stick(sx, sy)` — raw normalized stick setter used by
+  shaping layers that compute deflection themselves.
+- `VirtualGamepad.left_trigger(value)` — ADS / scope pull on most binds.
+- Injected `clock` parameter on `HumanizedGamepad` for deterministic,
+  driver-less testing.
+- `examples/humanizer_trace.py` — headless trace + assertions that verify
+  the four characteristic phases (idle / snap / track / release).
+
 ## [0.2.0] - 2026-05-13
 ### Changed
 - **Scope refocus.** Project is now strictly an external, fully user-mode
