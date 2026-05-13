@@ -10,11 +10,8 @@
 
 <p align="center">
   <a href="#"><img alt="python"     src="https://img.shields.io/badge/python-3.9%2B-3776AB?logo=python&logoColor=white"></a>
-  <a href="#"><img alt="platform"   src="https://img.shields.io/badge/platform-Windows-0078D6?logo=windows&logoColor=white"></a>
-  <a href="#"><img alt="license"    src="https://img.shields.io/badge/license-MIT-green"></a>
-  <a href="#"><img alt="status"     src="https://img.shields.io/badge/status-undetected%20%E2%80%94%20May%202026-success"></a>
-  <a href="#"><img alt="invasive"   src="https://img.shields.io/badge/process%20touched-none-informational"></a>
-  <a href="#"><img alt="signal"     src="https://img.shields.io/badge/output-humanized-9cf"></a>
+  <a href="#"><img alt="platform"   src="https://img.shields.io/badge/Windows-10+-0078D6?logo=windows&logoColor=white"></a>
+  <a href="#"><img alt="status"     src="https://img.shields.io/badge/undetected%20%E2%80%94%20May%202026-success"></a>
 </p>
 
 ---
